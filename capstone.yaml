@@ -1,0 +1,19 @@
+name: image-relevance
+description: AI Image Understanding & Content Matching Engine
+origin: FlyRank Backend AI Engineering Capstone
+
+run: docker compose --profile ai up --build -d
+seed: docker compose exec -T api /seed
+test: go test ./...
+dataset_download: python3 scripts/download-curated-dataset.py
+bootstrap: python3 scripts/bootstrap-evaluation.py
+evaluation: docker compose exec -T api /evaluate -images /evaluation-data/curated/runtime/images.csv -articles /evaluation-data/curated/runtime/articles.csv
+base_url: http://localhost:8080
+
+endpoints_to_probe:
+  - method: GET
+    path: /health
+    expected_status: 200
+  - method: GET
+    path: /ready
+    expected_status: 200

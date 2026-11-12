@@ -1,0 +1,77 @@
+# Keep the existing flyrank database/user defaults and postgres_data volume stable; renaming requires data migration.
+services:
+  db:
+    image: pgvector/pgvector:0.8.7-pg17-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-flyrank}
+      POSTGRES_USER: ${POSTGRES_USER:-flyrank}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flyrank_dev_password}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flyrank} -d ${POSTGRES_DB:-flyrank}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  api:
+    image: image-relevance-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      HTTP_ADDR: :8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL_DEVELOPMENT_DEFAULT: postgres://${POSTGRES_USER:-flyrank}:${POSTGRES_PASSWORD:-flyrank_dev_password}@db:5432/${POSTGRES_DB:-flyrank}?sslmode=disable
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5s}
+      DB_READINESS_TIMEOUT: ${DB_READINESS_TIMEOUT:-2s}
+      DB_MAX_CONNS: ${DB_MAX_CONNS:-10}
+      SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-10s}
+      IMAGE_STORAGE_PATH: /var/lib/image-relevance/images
+      MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES:-10485760}
+      GEMINI_VISION_MODEL: ${GEMINI_VISION_MODEL:-gemini-3.1-flash-lite}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      MATCH_SIMILARITY_FLOOR: ${MATCH_SIMILARITY_FLOOR:-0.35}
+    volumes:
+      - image_data:/var/lib/image-relevance/images
+      - ./evaluation-data:/evaluation-data:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    image: image-relevance-api:local
+    profiles: [ai]
+    entrypoint: ["/worker"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL_DEVELOPMENT_DEFAULT: postgres://${POSTGRES_USER:-flyrank}:${POSTGRES_PASSWORD:-flyrank_dev_password}@db:5432/${POSTGRES_DB:-flyrank}?sslmode=disable
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5s}
+      DB_MAX_CONNS: ${DB_MAX_CONNS:-10}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_VISION_MODEL: ${GEMINI_VISION_MODEL:-gemini-3.1-flash-lite}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2}
+      IMAGE_STORAGE_PATH: /var/lib/image-relevance/images
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-500ms}
+      VISION_CONFIDENCE_FLOOR: ${VISION_CONFIDENCE_FLOOR:-0.65}
+      MATCH_SIMILARITY_FLOOR: ${MATCH_SIMILARITY_FLOOR:-0.35}
+    volumes:
+      - image_data:/var/lib/image-relevance/images
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  image_data:

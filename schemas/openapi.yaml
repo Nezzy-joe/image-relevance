@@ -1,0 +1,179 @@
+openapi: 3.1.0
+info:
+  title: image-relevance API
+  version: 0.1.0
+  description: "AI Image Understanding & Content Matching Engine. Origin: FlyRank Backend AI Engineering Capstone. Business routes are development-only until tenant authentication is implemented."
+servers:
+  - url: http://localhost:8080
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Check API process liveness
+      responses:
+        '200':
+          description: The API process is alive.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      operationId: getReadiness
+      summary: Check API and PostgreSQL readiness
+      responses:
+        '200':
+          description: PostgreSQL is reachable.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: PostgreSQL is unavailable or not configured.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotReadyResponse'
+  /v1/images:
+    post:
+      operationId: uploadImage
+      summary: Upload a JPEG or PNG for asynchronous analysis
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: Image stored and processing job queued.
+        '200':
+          description: Duplicate image already exists for the development tenant.
+        '400':
+          description: Invalid image upload.
+        '413':
+          description: Image exceeds configured upload size.
+  /v1/images/{imageID}:
+    get:
+      operationId: getImage
+      summary: Get image processing state and analysis
+      parameters:
+        - name: imageID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Image state and metadata when available.
+        '404':
+          description: Image not found.
+  /v1/posts:
+    post:
+      operationId: createPost
+      summary: Resolve an article subject and create its embedding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, body]
+              properties:
+                title: { type: string, maxLength: 200 }
+                body: { type: string, maxLength: 20000 }
+      responses:
+        '201':
+          description: Post and subject embedding created.
+        '400':
+          description: Invalid post body.
+  /v1/posts/{postID}/matches:
+    post:
+      operationId: matchPost
+      summary: Rank images and apply subject and confidence guards
+      parameters:
+        - name: postID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Suggestions, rejected candidates, or no_confident_match abstention.
+        '404':
+          description: Post not found.
+  /v1/matches/{suggestionID}/review:
+    post:
+      operationId: reviewSuggestion
+      summary: Append an approval or rejection action
+      parameters:
+        - name: suggestionID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, rejected] }
+                comment: { type: string, maxLength: 2000 }
+      responses:
+        '201':
+          description: Review action appended.
+        '400':
+          description: Invalid decision or comment.
+        '404':
+          description: Match suggestion not found.
+components:
+  headers:
+    RequestID:
+      description: Per-request correlation identifier.
+      schema:
+        type: string
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          const: ok
+    ReadyResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          const: ready
+        checks:
+          type: object
+          required: [database]
+          properties:
+            database:
+              const: ok
+    NotReadyResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          const: not_ready
+        checks:
+          type: object
+          required: [database]
+          properties:
+            database:
+              const: unavailable

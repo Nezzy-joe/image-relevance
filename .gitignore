@@ -1,0 +1,61 @@
+# Environment files. Keep only the safe template visible to Git.
+.env
+.env.*
+*.env
+!.env.example
+
+# Private keys and certificate containers.
+*.pem
+*.key
+*.p12
+*.pfx
+*.ppk
+id_rsa
+id_ecdsa
+id_dsa
+id_ed25519
+*.exe
+
+# Local credentials and secrets directories.
+credentials
+credentials.*
+*-credentials
+*-credentials.*
+*_credentials
+*_credentials.*
+*.credential
+*.credentials
+service-account*.json
+service_account*.json
+**/.aws/credentials
+.secrets/
+secrets/
+
+# Local database files and exports.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.dump
+*.backup
+
+# Local data and build outputs.
+/data/
+/evaluation-data/*
+!/evaluation-data/curated/
+/evaluation-data/curated/assets/
+/evaluation-data/curated/runtime/
+/tmp/
+/bin/
+/build/
+/dist/
+/out/
+/target/
+/coverage/
+/coverage.out
+/coverage.html
+*.test
+*.prof
+**/__pycache__/
+*.py[cod]

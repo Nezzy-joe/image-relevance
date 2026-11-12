@@ -1,0 +1,112 @@
+[
+  {
+    "source_key": "fox_overview",
+    "title": "Red fox hunting and habitat",
+    "body": "Red foxes are widely distributed and use varied habitats. Their hunting depends on keen hearing, smell, and sight; they take small mammals and may also eat seasonal fruit. Red foxes raise pups in dens.",
+    "source_title": "Red Fox",
+    "source_url": "https://www.nps.gov/articles/red-fox.htm",
+    "category": "red_fox",
+    "scenario": "positive",
+    "verified_positive_image_file": "red-fox.jpg"
+  },
+  {
+    "source_key": "fox_winter",
+    "title": "Red fox winter hunting behavior",
+    "body": "Red foxes can locate rodents beneath snow by listening for movement, then make high leaps to reach prey. Field observations describe a distinctive hunting technique that helps a fox land over a hidden animal.",
+    "source_title": "Species Spotlight - Red Fox",
+    "source_url": "https://www.nps.gov/articles/species-spotlight-red-fox.htm",
+    "category": "red_fox",
+    "scenario": "mismatch_guard",
+    "verified_positive_image_file": "red-fox.jpg"
+  },
+  {
+    "source_key": "fox_adaptation",
+    "title": "Red fox adaptation and diet",
+    "body": "The red fox is adaptable across wild and settled landscapes. Its coat color varies, and its diet includes small animals as well as fruit when available; scent marking also communicates information to other foxes.",
+    "source_title": "The Clever Red Fox",
+    "source_url": "https://home.nps.gov/articles/fox.htm",
+    "category": "red_fox",
+    "scenario": "mismatch_guard",
+    "verified_positive_image_file": "red-fox.jpg"
+  },
+  {
+    "source_key": "wolf_pack",
+    "title": "Gray wolf pack behavior",
+    "body": "Gray wolf packs commonly include a breeding pair, their offspring, and other adults. Pups are raised in dens, younger wolves may disperse to establish new packs, and howling helps wolves communicate across their territories.",
+    "source_title": "Wolf Ecology Basics",
+    "source_url": "https://www.nps.gov/articles/life-of-a-wolf.htm",
+    "category": "gray_wolf",
+    "scenario": "positive",
+    "verified_positive_image_file": "gray_wolf-02.jpg"
+  },
+  {
+    "source_key": "wolf_kobuk",
+    "title": "Gray wolf habitat in Kobuk Valley",
+    "body": "Gray wolves live across Alaska in habitats ranging from forest and tundra to plains. In Kobuk Valley, wolves prey on caribou and may also hunt moose, muskox, sheep, hares, and other available animals.",
+    "source_title": "Gray Wolf - Kobuk Valley National Park",
+    "source_url": "https://home.nps.gov/kova/learn/nature/gray-wolf.htm",
+    "category": "gray_wolf",
+    "scenario": "mismatch_guard",
+    "verified_positive_image_file": "gray_wolf-02.jpg"
+  },
+  {
+    "source_key": "wolf_voyageurs",
+    "title": "Gray wolf research in Voyageurs",
+    "body": "Voyageurs National Park provides forest habitat for gray wolves. The wolves primarily prey on deer, moose, and beaver; during winter they live in family packs and can work together to hunt larger prey.",
+    "source_title": "Gray wolf - Voyageurs National Park",
+    "source_url": "https://www.nps.gov/voya/learn/nature/gray-wolf.htm",
+    "category": "gray_wolf",
+    "scenario": "mismatch_guard",
+    "verified_positive_image_file": "gray_wolf-02.jpg"
+  },
+  {
+    "source_key": "cheetah_ecosystems",
+    "title": "Cheetah conservation genetics",
+    "body": "Cheetah Conservation Fund researchers use genetic samples, including noninvasively collected scat, to identify individuals and study diet, health, and links among populations. These data help researchers understand population decline and conservation needs.",
+    "source_title": "From Popularity to Preservation: How Cheetahs Can Drive Ecosystem Conservation",
+    "source_url": "https://cheetah.org/ccf-blog/research/from-popularity-to-preservation-how-cheetahs-can-drive-ecosystem-conservation/",
+    "category": "cheetah",
+    "scenario": "positive",
+    "verified_positive_image_file": "cheetah-01.jpg"
+  },
+  {
+    "source_key": "cheetah_movement",
+    "title": "Cheetah movements and habitat",
+    "body": "Research on reintroduced and translocated cheetahs examines how individual history and release environments shape movement. Understanding those differences can help conservationists assess habitat and plan future releases.",
+    "source_title": "A Cheetah’s History, Habitat and Prey, Impacts Their Range",
+    "source_url": "https://cheetah.org/ccf-blog/research/a-cheetahs-history-habitat-and-prey-impacts-their-range/",
+    "category": "cheetah",
+    "scenario": "mismatch_guard",
+    "verified_positive_image_file": "cheetah-01.jpg"
+  },
+  {
+    "source_key": "eagle_life",
+    "title": "Bald eagle nesting and life history",
+    "body": "Bald eagles build large nests, often near water and suitable feeding areas, and may reuse or maintain alternate nests. Their breeding cycle includes courtship, egg laying, incubation, nestling, and fledgling stages.",
+    "source_title": "Bald Eagle (Haliaeetus leucocephalus)",
+    "source_url": "https://www.fws.gov/species/bald-eagle-haliaeetus-leucocephalus",
+    "category": "bald_eagle",
+    "scenario": "positive",
+    "verified_positive_image_file": "bald_eagle-02.jpg"
+  },
+  {
+    "source_key": "eagle_protection",
+    "title": "Bald eagle nesting season and human disturbance",
+    "body": "In Alaska, bald eagles move through courtship, nest building, egg laying, incubation, nestling, and fledgling phases. Conservation guidance describes how disturbance can affect nest success and recommends buffers and care near nests.",
+    "source_title": "Bald Eagle Nesting & Sensitivity to Human Activity",
+    "source_url": "https://www.fws.gov/Alaska-eagle-nesting",
+    "category": "bald_eagle",
+    "scenario": "mismatch_guard",
+    "verified_positive_image_file": "bald_eagle-02.jpg"
+  },
+  {
+    "source_key": "geology_control",
+    "title": "Yellowstone geology and hydrothermal features",
+    "body": "Yellowstone’s landscape was shaped by tectonic, glacial, erosional, and volcanic processes. Heat, groundwater, and underground pathways support geysers, hot springs, and other hydrothermal features.",
+    "source_title": "Geology - Yellowstone National Park",
+    "source_url": "https://home.nps.gov/yell/learn/nature/geology.htm",
+    "category": "",
+    "scenario": "no_suitable",
+    "verified_positive_image_file": ""
+  }
+]
