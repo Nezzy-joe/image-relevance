@@ -1,6 +1,18 @@
 package matching
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
+
+func TestListMatchesRejectsInvalidPagination(t *testing.T) {
+	service := &Service{}
+	for _, pair := range [][2]int{{0, 0}, {101, 0}, {1, -1}} {
+		if _, err := service.ListMatches(context.Background(), pair[0], pair[1]); err == nil {
+			t.Errorf("ListMatches(%d, %d) accepted invalid pagination", pair[0], pair[1])
+		}
+	}
+}
 
 func TestCandidateDecisionAppliesSubjectMismatchGuard(t *testing.T) {
 	fox, reason := candidateDecision("red fox", "red fox", "red fox", "red fox", 0.94, 0.65, 0.82, 0.35, false)

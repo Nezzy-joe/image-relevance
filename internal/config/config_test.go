@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadDevelopmentDefaults(t *testing.T) {
@@ -15,6 +16,12 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	if cfg.AppEnv != "development" {
 		t.Errorf("AppEnv = %q, want development", cfg.AppEnv)
 	}
+	if cfg.HTTPAddr != "127.0.0.1:8080" {
+		t.Errorf("HTTPAddr = %q, want host-loopback default", cfg.HTTPAddr)
+	}
+	if cfg.HTTPWriteTimeout != 65*time.Second || cfg.GeminiRequestTimeout != 25*time.Second {
+		t.Errorf("timeout defaults = HTTP %s / Gemini %s, want 65s / 25s", cfg.HTTPWriteTimeout, cfg.GeminiRequestTimeout)
+	}
 	if cfg.DatabaseURL != localDevelopmentDatabaseURL {
 		t.Errorf("DatabaseURL = %q, want documented local default", cfg.DatabaseURL)
 	}
@@ -23,6 +30,35 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	}
 	if cfg.GeminiAPIKey != "" {
 		t.Error("GeminiAPIKey should remain unset by default")
+	}
+}
+
+func TestLoadPreservesExplicitHTTPAddressAndTimeouts(t *testing.T) {
+	clearConfigEnvironment(t)
+	t.Setenv("HTTP_ADDR", "0.0.0.0:8080")
+	t.Setenv("HTTP_WRITE_TIMEOUT", "75s")
+	t.Setenv("GEMINI_REQUEST_TIMEOUT", "30s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.HTTPAddr != "0.0.0.0:8080" {
+		t.Errorf("HTTPAddr = %q, want explicit listener", cfg.HTTPAddr)
+	}
+	if cfg.HTTPWriteTimeout != 75*time.Second || cfg.GeminiRequestTimeout != 30*time.Second {
+		t.Errorf("timeouts = HTTP %s / Gemini %s, want 75s / 30s", cfg.HTTPWriteTimeout, cfg.GeminiRequestTimeout)
+	}
+}
+
+func TestLoadRejectsInsufficientHTTPWriteTimeoutBudget(t *testing.T) {
+	clearConfigEnvironment(t)
+	t.Setenv("HTTP_WRITE_TIMEOUT", "55s")
+	t.Setenv("GEMINI_REQUEST_TIMEOUT", "25s")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "two GEMINI_REQUEST_TIMEOUT calls plus 10s response margin") {
+		t.Fatalf("Load() error = %v, want insufficient provider/HTTP timeout budget", err)
 	}
 }
 
@@ -79,6 +115,8 @@ func clearConfigEnvironment(t *testing.T) {
 	for _, name := range []string{
 		"APP_ENV",
 		"HTTP_ADDR",
+		"HTTP_WRITE_TIMEOUT",
+		"GEMINI_REQUEST_TIMEOUT",
 		"DATABASE_URL",
 		"DATABASE_URL_DEVELOPMENT_DEFAULT",
 		"DB_CONNECT_TIMEOUT",

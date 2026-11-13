@@ -15,6 +15,7 @@ image-relevance is a Go backend that accepts image uploads, extracts structured 
 - `GET /health` process liveness and `GET /ready` PostgreSQL readiness.
 - Idempotent development tenant seed command: `cmd/seed`.
 - Development-only JPEG/PNG upload, content validation, SHA-256 deduplication, persistent file storage, and PostgreSQL job creation.
+- Development-only paginated image listing with validated metadata and lifecycle counts, tenant-scoped image content streaming, and recent persisted match history with latest review summaries.
 - PostgreSQL worker using `FOR UPDATE SKIP LOCKED`, bounded concurrency, retry backoff, job status tracking, and graceful cancellation.
 - Gemini adapter for structured image analysis, article subject resolution, and 768-dimensional image and article embeddings. Provider usage, available token/latency data, and a list-price cost estimate (when the model and usage have a verified rate) are recorded; this estimate is not a billed amount.
 - Cosine candidate ranking, phrase-aware subject compatibility checks, uncertainty/similarity rejection reasons, and `no_confident_match` abstention.
@@ -26,6 +27,16 @@ image-relevance is a Go backend that accepts image uploads, extracts structured 
 - Google model metadata reports `gemini-3.1-flash-lite` available with `generateContent` support. One minimal text request and one structured JPEG classification returned HTTP 200; the image JSON passed local schema validation.
 - Real JPEG and article text calls to `gemini-embedding-2` returned 768-dimensional vectors.
 - `go test ./...`, `go test -race ./...`, `go vet ./...`, and `docker compose config --quiet` pass.
+- Frontend `npm run typecheck`, `npm test` (8 mocked component tests), and `npm run build` pass; `npm ci` succeeds from `web/package-lock.json`.
+
+### Tested end to end — 2026-11-13
+
+- The live API and Vite proxy returned HTTP 200 for health and readiness. Two real, locally curated JPEGs (one red fox and one gray wolf) were uploaded, processed by the worker through Gemini, and persisted with metadata and 768-dimensional image embeddings.
+- A live red fox article received the red fox as accepted rank 1 (cosine similarity `0.4192`, classification confidence `0.98`); the gray wolf was rejected at rank 2 with the backend subject-mismatch explanation. An unrelated pollinator-garden article returned `no_confident_match` with no accepted suggestions.
+- The Matching Studio, Decision Inspector, Image Library, and Review Centre were exercised against those API records. Approval and rejection notes and timestamps remained available after refresh, while the original AI accept/reject decisions remained unchanged. The filtered-empty Image Library state and clear-filter recovery were also checked.
+- Desktop (1440 px) and mobile (390 px) layouts had no horizontal overflow. API-unavailable and recovery states were exercised. The full browser-level evidence is in [EVIDENCE.md](EVIDENCE.md).
+
+This two-image live interaction is an integration demonstration, not a new benchmark. The separate 40-image evaluation result dated 2026-11-12 below remains the recorded evaluation run.
 
 ### Tested end to end — 2026-11-12
 
@@ -95,6 +106,10 @@ curl -i -X POST http://localhost:8080/v1/posts/POST_UUID/matches
 The match response includes accepted suggestions and rejected candidates with reasons. When nothing passes, it returns `status: "no_confident_match"`, an empty `suggestions` array, and an abstention reason. Review a recorded decision with `POST /v1/matches/{suggestionID}/review` and JSON `{"decision":"approved"}` or `{"decision":"rejected","comment":"..."}`. Review history is append-only.
 
 See [docs/api-contract.md](docs/api-contract.md) and [schemas/openapi.yaml](schemas/openapi.yaml) for request and response contracts.
+
+## Frontend development
+
+The Image Relevance Studio frontend lives in [`web/`](web/README.md). Its implemented views are Overview, Image Library, Matching Studio, Decision Inspector, and Review Centre. Start the API and database as described above, then run `cd web && npm ci && npm run dev` in another terminal. Vite binds to `127.0.0.1:5173` and proxies `/api` requests to the loopback Go API. If that port is already occupied, run `npm run dev -- --host 127.0.0.1 --port 5174 --strictPort` and open `http://127.0.0.1:5174`. The frontend never receives the Gemini credential.
 
 ## Evaluation
 

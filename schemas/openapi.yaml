@@ -44,6 +44,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/NotReadyResponse'
   /v1/images:
+    get:
+      operationId: listImages
+      summary: List development-tenant images with validated analysis metadata
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 24 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
+        - name: q
+          in: query
+          description: Searches image checksum, subject, category, and caption.
+          schema: { type: string, maxLength: 120 }
+        - name: status
+          in: query
+          schema: { type: string, enum: [queued, processing, processed, needs_review, failed] }
+        - name: category
+          in: query
+          schema: { type: string, maxLength: 64 }
+        - name: subject
+          in: query
+          schema: { type: string, maxLength: 120 }
+      responses:
+        '200':
+          description: Paginated images, overall lifecycle counts, and validated analysis metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImagePage'
+        '400':
+          description: Invalid pagination or image filter.
     post:
       operationId: uploadImage
       summary: Upload a JPEG or PNG for asynchronous analysis
@@ -81,6 +113,25 @@ paths:
           description: Image state and metadata when available.
         '404':
           description: Image not found.
+  /v1/images/{imageID}/content:
+    get:
+      operationId: getImageContent
+      summary: Stream an image stored for the development tenant
+      parameters:
+        - name: imageID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Original JPEG or PNG bytes, served with nosniff and private no-store headers.
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+        '404':
+          description: Image or content not found for the development tenant.
   /v1/posts:
     post:
       operationId: createPost
@@ -136,10 +187,57 @@ paths:
       responses:
         '201':
           description: Review action appended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewAction' }
         '400':
           description: Invalid decision or comment.
         '404':
           description: Match suggestion not found.
+  /v1/matches:
+    get:
+      operationId: listRecentMatches
+      summary: List recent persisted match decisions and review summaries
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
+      responses:
+        '200':
+          description: Tenant-scoped match history with latest review action and review count.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MatchPage' }
+        '400':
+          description: Invalid pagination.
+  /v1/matches/{suggestionID}/reviews:
+    get:
+      operationId: listSuggestionReviewHistory
+      summary: List tenant-scoped append-only review history for a suggestion
+      parameters:
+        - name: suggestionID
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
+      responses:
+        '200':
+          description: Paginated immutable review actions, newest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewHistoryPage' }
+        '400':
+          description: Invalid pagination.
+        '404':
+          description: Suggestion not found for the development tenant.
 components:
   headers:
     RequestID:
@@ -177,3 +275,91 @@ components:
           properties:
             database:
               const: unavailable
+    ImageMetadata:
+      type: object
+      required: [subject, category, attributes, caption, confidence]
+      properties:
+        subject: { type: string }
+        category: { type: string }
+        attributes:
+          type: array
+          items: { type: string }
+        caption: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+    ImageRecord:
+      type: object
+      required: [id, status, sha256, mime_type, size_bytes, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, processing, processed, needs_review, failed] }
+        sha256: { type: string, minLength: 64, maxLength: 64 }
+        mime_type: { type: string, enum: [image/jpeg, image/png] }
+        size_bytes: { type: integer }
+        metadata:
+          anyOf:
+            - $ref: '#/components/schemas/ImageMetadata'
+            - type: 'null'
+        created_at: { type: string, format: date-time }
+    ImagePage:
+      type: object
+      required: [items, total, limit, offset, status_counts]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ImageRecord' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        status_counts:
+          type: object
+          additionalProperties: { type: integer }
+    ReviewAction:
+      type: object
+      required: [id, decision, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        decision: { type: string, enum: [approved, rejected] }
+        comment: { type: string }
+        created_at: { type: string, format: date-time }
+    ReviewHistoryPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ReviewAction' }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        offset: { type: integer, minimum: 0 }
+    RecentMatch:
+      type: object
+      required: [suggestion_id, post_id, post_title, post_subject, subject_confidence, image_id, rank, confidence, uncertain, similarity, accepted, created_at, review_count]
+      properties:
+        suggestion_id: { type: string, format: uuid }
+        post_id: { type: string, format: uuid }
+        post_title: { type: string }
+        post_subject: { type: string }
+        subject_confidence: { type: number, minimum: 0, maximum: 1 }
+        image_id: { type: string, format: uuid }
+        rank: { type: integer, minimum: 1 }
+        subject: { type: string }
+        category: { type: string }
+        caption: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        uncertain: { type: boolean }
+        similarity: { type: number, minimum: -1, maximum: 1 }
+        accepted: { type: boolean }
+        rejection_reason: { type: string }
+        created_at: { type: string, format: date-time }
+        latest_review: { $ref: '#/components/schemas/ReviewAction' }
+        review_count: { type: integer, minimum: 0 }
+    MatchPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RecentMatch' }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        offset: { type: integer, minimum: 0 }

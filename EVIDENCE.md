@@ -1,6 +1,54 @@
 # image-relevance — verification evidence
 
-> **Latest status:** The release-preparation evidence below supersedes older runtime counts and evaluation summaries in this historical log. Earlier sections record dated checkpoints. UUIDs shown in old checkpoints are redacted and must not be used as dataset identifiers.
+> **Latest status:** The live frontend integration verification below records the 2026-11-13 UI/API run. The 2026-11-12 section remains the separate 40-image evaluation result. Earlier sections are dated checkpoints; UUIDs in historical output are redacted and must not be used as dataset identifiers.
+
+## Live frontend integration verification — 2026-11-13
+
+The live API and frontend used the existing disposable PostgreSQL 17 database `image_relevance_test` in container `image-relevance-phase-e-db`, mounted on `image-relevance-phase-e-postgres-data-20261113` and bound only to `127.0.0.1:15433`. The database remained available; no existing application database or volume was recreated. The API startup target check matched this isolated database before launch. API and worker environment values were checked only for boolean key presence and database-target match; no values were printed.
+
+### API and frontend proxy
+
+Direct API checks returned:
+
+```text
+GET /health HTTP 200
+{"status":"ok"}
+GET /ready HTTP 200
+{"checks":{"database":"ok"},"status":"ready"}
+```
+
+The frontend Vite proxy at `127.0.0.1:5174` returned the same HTTP 200 health and readiness bodies through `/api/health` and `/api/ready`. Paginated reads with `limit=1` at offsets 0 and 1 each returned one of the two persisted images; the unfiltered read returned both. A review POST for a nonexistent suggestion returned HTTP 404 with the standard JSON `not_found` error. The API was also made unavailable and restarted; the UI showed its service error state, then recovered to live data.
+
+### Real image processing and matching
+
+The smoke test used the existing curated red fox and gray wolf JPEG assets. Both were accepted by the upload endpoint (HTTP 202), processed by the running worker, and finished with database status `processed`. Gemini image classification persisted:
+
+| Asset | Detected subject | Category | Confidence |
+| --- | --- | --- | ---: |
+| Red fox JPEG | Red Fox | Mammal | 0.98 |
+| Gray wolf JPEG | Grey wolf | Wild animal | 0.98 |
+
+Image and article embeddings were persisted at 768 dimensions. Two real articles were created with Gemini-resolved subjects. For the red fox article, matching accepted the fox at rank 1 with cosine similarity `0.4192`; the gray wolf was rejected at rank 2 with similarity `0.3639` and the backend explanation `Subject mismatch: article subject 'red foxes' does not match image subject 'Grey wolf'.` The unrelated pollinator-garden article returned `no_confident_match`, zero accepted suggestions, and two rejected candidates. These are the two-image demonstration results, not an evaluation metric.
+
+The Image Library displayed the persisted previews and metadata. Filtering for a nonexistent category showed the filtered-empty state; clearing filters restored both records. Matching Studio created both articles and displayed the actual recommendations. Decision Inspector showed the backend similarity, confidence, rank, and rejection explanation.
+
+### Human review
+
+The Review Centre approved the fox suggestion with the note `Verified red fox subject and image preview; approve the relevant match.` and rejected the wolf suggestion with the note `Rejecting the wolf candidate for the red fox article; the subject mismatch guard is correct.` Both actions and timestamps remained visible after refresh. A final API read returned four persisted suggestions (one accepted, three rejected); two had one review each. The history endpoint returned the approval/rejection decisions, nonempty notes, and timestamps, while the original AI decisions remained unchanged. An unreviewed suggestion displayed the empty-history state.
+
+### Provider usage and frontend checks
+
+Database usage records for this smoke run showed two successful image classifications and one failed provider attempt before successful processing; successful classification rows had available token metadata, latency, and list-price estimates. Two image-embedding calls and two text-embedding calls were recorded. The image embedding rows had latency and estimates but no provider token counts; text embedding rows had latency with no token counts or cost estimate. Subject-resolution calls had available token/latency metadata and list-price estimates. Estimates are not billed amounts.
+
+The browser exercised desktop at 1440×900 and mobile at 390×844; neither layout had horizontal overflow. Frontend checks passed: `npm ci`, `npm run typecheck`, `npm test` (1 file, 5 mocked tests), and `npm run build` (2,239 modules transformed). These mocked tests complement, but do not replace, the live API/browser flow above.
+
+### Scope limits
+
+- This run used two images and two articles only; broad matching quality is represented by the separate 40-image evaluation above.
+- The filtered-empty image state was exercised; a genuinely zero-record tenant was not created. API pagination at offsets 0 and 1 was checked, but the UI pager controls were not, because two records are below the page size. Image processing ultimately succeeded, so the worker terminal-failure UI was not forced. Review HTTP 404 was checked directly, but a failed review submission was not forced through the browser UI.
+- The isolated test database already held demonstration records from this stage and was intentionally preserved. Do not run empty-database-only integration setup against it without an isolated reset plan.
+- The API uses one seeded development tenant and does not authenticate tenant or reviewer identity. No production multi-tenant boundary was tested.
+- The standard registry-backed Docker build remains unverified because Docker Hub connectivity failed in the earlier recorded build attempt.
 
 ## Fresh-database release verification — 2026-11-12
 
@@ -599,3 +647,22 @@ GET /ready: HTTP 200
 ```
 
 Final read-only PostgreSQL counts were `image_embeddings=3` rows with 768 dimensions, `posts=2` rows with 768 dimensions, and `match_suggestions=6`. The migration state remained `2:false`, pgvector remained `0.8.7`, and all persisted image vectors matched the development tenant ID associated with their image rows.
+
+## Frontend Phase A/B verification — 2026-11-13
+
+The React/TypeScript workspace shell, overview, image library, upload polling, metadata inspector, Zod API models, and local Vite proxy were implemented. Matching Studio, Decision Inspector, and Review Centre remain explicitly unimplemented frontend routes.
+
+```text
+go test ./...: passed
+go test -race ./...: passed
+go vet ./...: passed
+docker compose config --quiet: passed
+npm run typecheck: passed
+npm test: passed, 2 tests
+npm run build: passed, Vite 8.3.8
+Vite page on 127.0.0.1:5174: HTTP 200
+Vite /api/health proxy: HTTP 502 because the Go API was not running
+PostgreSQL read-endpoint integration test: skipped; IMAGE_RELEVANCE_TEST_DATABASE_URL was not configured
+```
+
+Port `5173` was already serving an unrelated local site, so the preview used `5174`; the committed Vite configuration still defaults to `127.0.0.1:5173`. Compose and the Go API were not started during this frontend pass, so no database volume was opened or migrated. npm registry access timed out and the default npm cache is read-only; the frontend package lock could not be generated. Run `npm install` in a network-enabled environment before treating dependency installation as reproducible. The build and tests above used the dependencies available in the local npm cache.

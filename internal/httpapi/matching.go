@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/Nezzy-joe/image-relevance/internal/domain"
 	"github.com/Nezzy-joe/image-relevance/internal/matching"
@@ -34,20 +35,81 @@ func registerMatchingRoutes(router chi.Router, operations MatchingOperations) {
 			}
 			writeJSON(w, http.StatusOK, result)
 		})
-		r.Post("/matches/{suggestionID}/review", func(w http.ResponseWriter, r *http.Request) {
-			var input matching.Review
-			if err := decodeJSON(w, r, 4<<10, &input); err != nil {
-				writeImageJSONError(w, r, http.StatusBadRequest, "invalid_request", "request body must be a valid review JSON object")
-				return
-			}
-			result, err := operations.Review(r.Context(), chi.URLParam(r, "suggestionID"), input)
-			if err != nil {
-				writeMatchingError(w, r, err)
-				return
-			}
-			writeJSON(w, http.StatusCreated, result)
-		})
 	})
+}
+
+func registerReviewRoute(router chi.Router, operations ReviewOperations) {
+	router.Post("/v1/matches/{suggestionID}/review", func(w http.ResponseWriter, r *http.Request) {
+		suggestionID := chi.URLParam(r, "suggestionID")
+		if !imageIDPattern.MatchString(suggestionID) {
+			writeImageJSONError(w, r, http.StatusNotFound, "not_found", "the requested match suggestion was not found")
+			return
+		}
+		var input matching.Review
+		if err := decodeJSON(w, r, 4<<10, &input); err != nil {
+			writeImageJSONError(w, r, http.StatusBadRequest, "invalid_request", "request body must be a valid review JSON object")
+			return
+		}
+		result, err := operations.Review(r.Context(), suggestionID, input)
+		if err != nil {
+			writeMatchingError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, result)
+	})
+}
+
+func registerMatchHistoryRoute(router chi.Router, operations MatchHistoryOperations) {
+	router.Get("/v1/matches", func(w http.ResponseWriter, r *http.Request) {
+		limit, offset, err := parsePagination(r, 20, 100)
+		if err != nil {
+			writeImageJSONError(w, r, http.StatusBadRequest, "invalid_query", "pagination is invalid")
+			return
+		}
+		page, err := operations.ListMatches(r.Context(), limit, offset)
+		if err != nil {
+			writeMatchingError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, page)
+	})
+	router.Get("/v1/matches/{suggestionID}/reviews", func(w http.ResponseWriter, r *http.Request) {
+		suggestionID := chi.URLParam(r, "suggestionID")
+		if !imageIDPattern.MatchString(suggestionID) {
+			writeImageJSONError(w, r, http.StatusNotFound, "not_found", "the requested match suggestion was not found")
+			return
+		}
+		limit, offset, err := parsePagination(r, 20, 100)
+		if err != nil {
+			writeImageJSONError(w, r, http.StatusBadRequest, "invalid_query", "pagination is invalid")
+			return
+		}
+		page, err := operations.ListReviewHistory(r.Context(), suggestionID, limit, offset)
+		if err != nil {
+			writeMatchingError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, page)
+	})
+}
+
+func parsePagination(r *http.Request, defaultLimit, maxLimit int) (int, int, error) {
+	limit, offset := defaultLimit, 0
+	if value := r.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > maxLimit {
+			return 0, 0, errors.New("invalid limit")
+		}
+		limit = parsed
+	}
+	if value := r.URL.Query().Get("offset"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 || parsed > 1_000_000 {
+			return 0, 0, errors.New("invalid offset")
+		}
+		offset = parsed
+	}
+	return limit, offset, nil
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, limit int64, target any) error {

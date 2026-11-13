@@ -13,23 +13,25 @@ import (
 const localDevelopmentDatabaseURL = "postgres://flyrank:flyrank_dev_password@localhost:15432/flyrank?sslmode=disable"
 
 type Config struct {
-	AppEnv            string
-	HTTPAddr          string
-	DatabaseURL       string
-	DatabaseConnect   time.Duration
-	DatabaseReadiness time.Duration
-	DatabaseMaxConns  int32
-	ShutdownTimeout   time.Duration
-	GeminiAPIKey      string
-	VisionModel       string
-	EmbeddingModel    string
-	ImageStoragePath  string
-	MaxImageBytes     int64
-	WorkerConcurrency int
-	WorkerPoll        time.Duration
-	ConfidenceFloor   float64
-	SimilarityFloor   float64
-	LogLevel          slog.Level
+	AppEnv               string
+	HTTPAddr             string
+	HTTPWriteTimeout     time.Duration
+	GeminiRequestTimeout time.Duration
+	DatabaseURL          string
+	DatabaseConnect      time.Duration
+	DatabaseReadiness    time.Duration
+	DatabaseMaxConns     int32
+	ShutdownTimeout      time.Duration
+	GeminiAPIKey         string
+	VisionModel          string
+	EmbeddingModel       string
+	ImageStoragePath     string
+	MaxImageBytes        int64
+	WorkerConcurrency    int
+	WorkerPoll           time.Duration
+	ConfidenceFloor      float64
+	SimilarityFloor      float64
+	LogLevel             slog.Level
 }
 
 func Load() (Config, error) {
@@ -49,20 +51,33 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:            appEnv,
-		HTTPAddr:          envString("HTTP_ADDR", ":8080"),
-		DatabaseURL:       databaseURL,
-		DatabaseMaxConns:  10,
-		GeminiAPIKey:      strings.TrimSpace(os.Getenv("GEMINI_API_KEY")),
-		VisionModel:       envString("GEMINI_VISION_MODEL", "gemini-3.1-flash-lite"),
-		EmbeddingModel:    envString("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2"),
-		ImageStoragePath:  envString("IMAGE_STORAGE_PATH", "./data/images"),
-		WorkerConcurrency: 2,
-		ConfidenceFloor:   0.65,
-		SimilarityFloor:   0.35,
+		AppEnv:               appEnv,
+		HTTPAddr:             envString("HTTP_ADDR", "127.0.0.1:8080"),
+		HTTPWriteTimeout:     65 * time.Second,
+		GeminiRequestTimeout: 25 * time.Second,
+		DatabaseURL:          databaseURL,
+		DatabaseMaxConns:     10,
+		GeminiAPIKey:         strings.TrimSpace(os.Getenv("GEMINI_API_KEY")),
+		VisionModel:          envString("GEMINI_VISION_MODEL", "gemini-3.1-flash-lite"),
+		EmbeddingModel:       envString("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2"),
+		ImageStoragePath:     envString("IMAGE_STORAGE_PATH", "./data/images"),
+		WorkerConcurrency:    2,
+		ConfidenceFloor:      0.65,
+		SimilarityFloor:      0.35,
 	}
 
 	var err error
+	if cfg.HTTPWriteTimeout, err = envDuration("HTTP_WRITE_TIMEOUT", 65*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.GeminiRequestTimeout, err = envDuration("GEMINI_REQUEST_TIMEOUT", 25*time.Second); err != nil {
+		return Config{}, err
+	}
+	// CreatePost makes two provider requests in sequence. Keep a finite 10-second
+	// response margin after both per-call timeouts so a valid request can finish.
+	if cfg.HTTPWriteTimeout < 10*time.Second || cfg.GeminiRequestTimeout > (cfg.HTTPWriteTimeout-10*time.Second)/2 {
+		return Config{}, fmt.Errorf("HTTP_WRITE_TIMEOUT must allow two GEMINI_REQUEST_TIMEOUT calls plus 10s response margin")
+	}
 	if cfg.DatabaseConnect, err = envDuration("DB_CONNECT_TIMEOUT", 5*time.Second); err != nil {
 		return Config{}, err
 	}

@@ -38,7 +38,10 @@ func New(ctx context.Context, cfg config.Config) (*Client, error) {
 	if strings.TrimSpace(cfg.GeminiAPIKey) == "" {
 		return nil, errors.New("GEMINI_API_KEY is required by the Gemini worker")
 	}
-	requestTimeout := 25 * time.Second
+	requestTimeout := cfg.GeminiRequestTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = 25 * time.Second
+	}
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:      cfg.GeminiAPIKey,
 		Backend:     genai.BackendGeminiAPI,

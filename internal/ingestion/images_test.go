@@ -55,3 +55,14 @@ func TestValidateImageRejectsNonImageData(t *testing.T) {
 		t.Fatalf("validateImage() error = %v, want invalid image error", err)
 	}
 }
+
+func TestSafeStorageKeyAllowsDigestNamesOnly(t *testing.T) {
+	if !safeStorageKey.MatchString("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.jpg") {
+		t.Fatal("valid content-addressed JPEG key rejected")
+	}
+	for _, key := range []string{"../secret.jpg", "nested/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.png", "0123456789abcdef.jpg"} {
+		if safeStorageKey.MatchString(key) {
+			t.Errorf("unsafe storage key accepted: %q", key)
+		}
+	}
+}

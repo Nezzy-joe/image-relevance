@@ -54,22 +54,26 @@ func run() error {
 
 	var imageOperations httpapi.ImageOperations
 	var matchingOperations httpapi.MatchingOperations
+	var matchHistoryOperations httpapi.MatchHistoryOperations
 	if cfg.AppEnv == "development" {
 		imageOperations = ingestion.NewImageService(pool, cfg.ImageStoragePath, cfg.MaxImageBytes)
+		matchHistoryOperations = matching.New(pool, nil, cfg.ConfidenceFloor, cfg.SimilarityFloor)
 		if cfg.GeminiAPIKey != "" {
 			provider, err := gemini.New(context.Background(), cfg)
 			if err != nil {
 				return errors.New("Gemini client initialization failed")
 			}
-			matchingOperations = matching.New(pool, provider, cfg.ConfidenceFloor, cfg.SimilarityFloor)
+			service := matching.New(pool, provider, cfg.ConfidenceFloor, cfg.SimilarityFloor)
+			matchingOperations = service
+			matchHistoryOperations = service
 		}
 	}
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouterWithOperations(logger, pool, cfg.DatabaseReadiness, imageOperations, matchingOperations, cfg.MaxImageBytes),
+		Handler:           httpapi.NewRouterWithReadOperations(logger, pool, cfg.DatabaseReadiness, imageOperations, matchingOperations, matchHistoryOperations, cfg.MaxImageBytes),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      cfg.HTTPWriteTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
 
