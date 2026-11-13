@@ -40,6 +40,29 @@ type ImageUploadResult struct {
 	Existing bool   `json:"existing"`
 }
 
+type ImageListFilter struct {
+	Limit    int
+	Offset   int
+	Query    string
+	Status   string
+	Category string
+	Subject  string
+}
+
+type ImagePage struct {
+	Items        []ImageRecord  `json:"items"`
+	Total        int            `json:"total"`
+	Limit        int            `json:"limit"`
+	Offset       int            `json:"offset"`
+	StatusCounts map[string]int `json:"status_counts"`
+}
+
+type ImageContent struct {
+	Body      io.ReadCloser
+	MIMEType  string
+	SizeBytes int64
+}
+
 func ParseImageMetadata(data []byte) (ImageMetadata, error) {
 	if len(data) == 0 || len(data) > 16*1024 {
 		return ImageMetadata{}, errors.New("metadata JSON has an invalid size")

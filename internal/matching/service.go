@@ -318,6 +318,102 @@ type ReviewResult struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type RecentMatch struct {
+	SuggestionID      string        `json:"suggestion_id"`
+	PostID            string        `json:"post_id"`
+	PostTitle         string        `json:"post_title"`
+	PostSubject       string        `json:"post_subject"`
+	SubjectConfidence float64       `json:"subject_confidence"`
+	ImageID           string        `json:"image_id"`
+	Rank              int           `json:"rank"`
+	Subject           string        `json:"subject,omitempty"`
+	Category          string        `json:"category,omitempty"`
+	Caption           string        `json:"caption,omitempty"`
+	Confidence        float64       `json:"confidence"`
+	Uncertain         bool          `json:"uncertain"`
+	Similarity        float64       `json:"similarity"`
+	Accepted          bool          `json:"accepted"`
+	RejectionReason   string        `json:"rejection_reason,omitempty"`
+	CreatedAt         time.Time     `json:"created_at"`
+	LatestReview      *ReviewResult `json:"latest_review,omitempty"`
+	ReviewCount       int           `json:"review_count"`
+}
+
+type MatchPage struct {
+	Items  []RecentMatch `json:"items"`
+	Total  int           `json:"total"`
+	Limit  int           `json:"limit"`
+	Offset int           `json:"offset"`
+}
+
+type ReviewHistoryPage struct {
+	Items  []ReviewResult `json:"items"`
+	Total  int            `json:"total"`
+	Limit  int            `json:"limit"`
+	Offset int            `json:"offset"`
+}
+
+func (s *Service) ListMatches(ctx context.Context, limit, offset int) (MatchPage, error) {
+	if limit < 1 || limit > 100 || offset < 0 {
+		return MatchPage{}, errors.New("invalid match pagination")
+	}
+	tenantID, err := s.tenantID(ctx)
+	if err != nil {
+		return MatchPage{}, err
+	}
+	var total int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM match_suggestions WHERE tenant_id=$1::uuid`, tenantID).Scan(&total); err != nil {
+		return MatchPage{}, errors.New("could not count match suggestions")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT ms.id::text, ms.post_id::text, p.title, p.subject, p.subject_confidence, ms.image_id::text, ms.rank,
+		       COALESCE(a.subject,''), COALESCE(a.category,''), COALESCE(a.caption,''), COALESCE(a.confidence,0), COALESCE(a.uncertain,true),
+		       ms.similarity, ms.accepted, COALESCE(ms.rejection_reason,''), ms.created_at,
+		       latest.id::text, latest.decision, COALESCE(latest.comment,''), latest.created_at,
+		       review_counts.review_count
+		FROM match_suggestions ms
+		JOIN posts p ON p.id=ms.post_id AND p.tenant_id=ms.tenant_id
+		JOIN images i ON i.id=ms.image_id AND i.tenant_id=ms.tenant_id
+		LEFT JOIN image_analysis a ON a.image_id=i.id
+		LEFT JOIN LATERAL (
+			SELECT ra.id, ra.decision, ra.comment, ra.created_at
+			FROM review_actions ra
+			WHERE ra.suggestion_id=ms.id AND ra.tenant_id=ms.tenant_id
+			ORDER BY ra.created_at DESC, ra.id DESC LIMIT 1
+		) latest ON true
+		JOIN LATERAL (
+			SELECT count(*)::int AS review_count
+			FROM review_actions ra
+			WHERE ra.suggestion_id=ms.id AND ra.tenant_id=ms.tenant_id
+		) review_counts ON true
+		WHERE ms.tenant_id=$1::uuid
+		ORDER BY ms.created_at DESC, ms.id DESC
+		LIMIT $2 OFFSET $3`, tenantID, limit, offset)
+	if err != nil {
+		return MatchPage{}, errors.New("could not list match suggestions")
+	}
+	defer rows.Close()
+	items := make([]RecentMatch, 0)
+	for rows.Next() {
+		var item RecentMatch
+		var latestID, latestDecision, latestComment *string
+		var latestAt *time.Time
+		if err := rows.Scan(&item.SuggestionID, &item.PostID, &item.PostTitle, &item.PostSubject, &item.SubjectConfidence, &item.ImageID, &item.Rank,
+			&item.Subject, &item.Category, &item.Caption, &item.Confidence, &item.Uncertain, &item.Similarity, &item.Accepted, &item.RejectionReason, &item.CreatedAt,
+			&latestID, &latestDecision, &latestComment, &latestAt, &item.ReviewCount); err != nil {
+			return MatchPage{}, errors.New("could not list match suggestions")
+		}
+		if latestID != nil && latestDecision != nil && latestComment != nil && latestAt != nil {
+			item.LatestReview = &ReviewResult{ID: *latestID, Decision: *latestDecision, Comment: *latestComment, CreatedAt: *latestAt}
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return MatchPage{}, errors.New("could not list match suggestions")
+	}
+	return MatchPage{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+}
+
 func (s *Service) Review(ctx context.Context, suggestionID string, review Review) (ReviewResult, error) {
 	if review.Decision != "approved" && review.Decision != "rejected" {
 		return ReviewResult{}, ErrInvalidReview
@@ -343,6 +439,55 @@ func (s *Service) Review(ctx context.Context, suggestionID string, review Review
 		return ReviewResult{}, errors.New("could not save review action")
 	}
 	return result, nil
+}
+
+func (s *Service) ListReviewHistory(ctx context.Context, suggestionID string, limit, offset int) (ReviewHistoryPage, error) {
+	if limit < 1 || limit > 100 || offset < 0 {
+		return ReviewHistoryPage{}, errors.New("invalid review history pagination")
+	}
+	tenantID, err := s.tenantID(ctx)
+	if err != nil {
+		return ReviewHistoryPage{}, err
+	}
+	var total int
+	err = s.pool.QueryRow(ctx, `
+		SELECT count(ra.id)::int
+		FROM match_suggestions ms
+		LEFT JOIN review_actions ra ON ra.suggestion_id=ms.id AND ra.tenant_id=ms.tenant_id
+		WHERE ms.id=$1::uuid AND ms.tenant_id=$2::uuid`, suggestionID, tenantID).Scan(&total)
+	if err != nil {
+		return ReviewHistoryPage{}, errors.New("could not retrieve review history")
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM match_suggestions WHERE id=$1::uuid AND tenant_id=$2::uuid)`, suggestionID, tenantID).Scan(&exists); err != nil {
+		return ReviewHistoryPage{}, errors.New("could not retrieve review history")
+	}
+	if !exists {
+		return ReviewHistoryPage{}, ErrSuggestionNotFound
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT ra.id::text, ra.decision, COALESCE(ra.comment,''), ra.created_at
+		FROM review_actions ra
+		JOIN match_suggestions ms ON ms.id=ra.suggestion_id AND ms.tenant_id=ra.tenant_id
+		WHERE ms.id=$1::uuid AND ms.tenant_id=$2::uuid
+		ORDER BY ra.created_at DESC, ra.id DESC
+		LIMIT $3 OFFSET $4`, suggestionID, tenantID, limit, offset)
+	if err != nil {
+		return ReviewHistoryPage{}, errors.New("could not retrieve review history")
+	}
+	defer rows.Close()
+	items := make([]ReviewResult, 0)
+	for rows.Next() {
+		var item ReviewResult
+		if err := rows.Scan(&item.ID, &item.Decision, &item.Comment, &item.CreatedAt); err != nil {
+			return ReviewHistoryPage{}, errors.New("could not retrieve review history")
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return ReviewHistoryPage{}, errors.New("could not retrieve review history")
+	}
+	return ReviewHistoryPage{Items: items, Total: total, Limit: limit, Offset: offset}, nil
 }
 
 func (s *Service) tenantID(ctx context.Context) (string, error) {

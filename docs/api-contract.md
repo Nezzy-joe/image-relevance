@@ -30,6 +30,10 @@ When PostgreSQL is unavailable or unconfigured, it returns HTTP `503`:
 
 ## Development image routes
 
+### `GET /v1/images`
+
+Returns a tenant-scoped page using `limit` (default 24, maximum 100) and `offset`. Optional `q` searches the checksum, validated subject, category, and caption. Optional `status`, `category`, and `subject` filters apply to persisted records. The response includes `{items,total,limit,offset,status_counts}`; `status_counts` covers the full development tenant, not only the current page. Analysis metadata is included only when it passes the domain schema validation. Invalid filters return HTTP `400`.
+
 ### `POST /v1/images`
 
 Accepts `multipart/form-data` with a `file` field. Only valid JPEG and PNG data is accepted; maximum size defaults to 10 MiB. The server calculates SHA-256 and deduplicates within the development tenant. A new image returns HTTP `202` and creates a `queued` image plus an `analyze_image` job. Existing content returns HTTP `200` with the existing image state. Requires a seeded tenant; actual processing requires the optional Gemini worker profile and `GEMINI_API_KEY`.
@@ -40,9 +44,17 @@ Returns the image checksum, MIME type, byte size, lifecycle state, and validated
 
 Image state values are `queued`, `processing`, `processed`, `needs_review`, and `failed`. Low-confidence analysis is stored with `uncertain=true` and state `needs_review`; it is not eligible for automatic recommendation.
 
+### `GET /v1/images/{imageID}/content`
+
+Streams the original JPEG or PNG bytes for an image belonging to the development tenant. The content lookup is tenant-scoped and opens only generated SHA-256 storage keys through a rooted filesystem API. Responses include `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`; missing rows or files return the standard JSON `404` error envelope.
+
 ## Development post, matching, and review routes
 
-These require the development tenant and a configured Gemini client in the API process.
+Article creation and matching require the development tenant and a configured Gemini client in the API process. Match-history reads and review actions require the seeded tenant and PostgreSQL, but do not call Gemini.
+
+### `GET /v1/matches`
+
+Returns paginated recent match suggestions persisted by matching requests. The response joins only posts and images in the same development tenant and includes article/image metadata, candidate rank, the original accepted decision and rejection reason, the latest append-only review action, and review count. `limit` defaults to 20 (maximum 100); `offset` defaults to 0. This route does not replace or mutate AI decisions.
 
 ### `POST /v1/posts`
 
@@ -71,7 +83,11 @@ Match decisions are inserted as immutable suggestion records; later runs create 
 
 ### `POST /v1/matches/{suggestionID}/review`
 
-Accepts JSON `{"decision":"approved"}` or `{"decision":"rejected","comment":"..."}`. Returns HTTP `201`. Every review creates an append-only `review_actions` row and leaves the original suggestion decision intact.
+Accepts JSON `{"decision":"approved"}` or `{"decision":"rejected","comment":"..."}`. Returns HTTP `201`. Every review creates an append-only `review_actions` row and leaves the original suggestion decision intact. Review actions are available in development even when the Gemini provider is not configured.
+
+### `GET /v1/matches/{suggestionID}/reviews`
+
+Returns the tenant-scoped append-only review audit history for one persisted suggestion, newest first. Accepts `limit` (default 20, maximum 100) and `offset` (default 0), and returns `{items,total,limit,offset}`. Each item includes the review action ID, decision, optional comment, and creation timestamp. A suggestion outside the development tenant returns `404`.
 
 ## JSON errors
 

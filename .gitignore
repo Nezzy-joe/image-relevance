@@ -53,6 +53,10 @@ secrets/
 /out/
 /target/
 /coverage/
+/web/node_modules/
+/web/dist/
+/web/.vite/
+/web/coverage/
 /coverage.out
 /coverage.html
 *.test

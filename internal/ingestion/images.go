@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/Nezzy-joe/image-relevance/internal/domain"
 	"github.com/jackc/pgx/v5"
@@ -30,6 +31,8 @@ const (
 	developmentTenantName = "image-relevance development tenant"
 	maxImagePixels        = int64(40_000_000)
 )
+
+var safeStorageKey = regexp.MustCompile(`^[a-f0-9]{64}\.(jpg|png)$`)
 
 type ImageService struct {
 	pool     *pgxpool.Pool
@@ -136,6 +139,124 @@ func (s *ImageService) Get(ctx context.Context, imageID string) (domain.ImageRec
 		record.Metadata = metadata
 	}
 	return record, nil
+}
+
+func (s *ImageService) List(ctx context.Context, filter domain.ImageListFilter) (domain.ImagePage, error) {
+	tenantID, err := s.developmentTenantID(ctx)
+	if err != nil {
+		return domain.ImagePage{}, err
+	}
+	if filter.Limit < 1 || filter.Limit > 100 || filter.Offset < 0 {
+		return domain.ImagePage{}, errors.New("invalid image pagination")
+	}
+	const where = `i.tenant_id=$1::uuid
+		AND ($2='' OR i.status=$2)
+		AND ($3='' OR a.category ILIKE $3)
+		AND ($4='' OR a.subject ILIKE $4)
+		AND ($5='' OR i.sha256 ILIKE $5 OR COALESCE(a.subject,'') ILIKE $5 OR COALESCE(a.category,'') ILIKE $5 OR COALESCE(a.caption,'') ILIKE $5)`
+	like := func(value string) string {
+		if value == "" {
+			return ""
+		}
+		return "%" + value + "%"
+	}
+	args := []any{tenantID, filter.Status, like(filter.Category), like(filter.Subject), like(filter.Query)}
+	var total int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM images i LEFT JOIN image_analysis a ON a.image_id=i.id WHERE `+where, args...).Scan(&total); err != nil {
+		return domain.ImagePage{}, errors.New("could not count images")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT i.id::text, i.status, i.sha256, i.mime_type, i.size_bytes, i.created_at,
+		       a.subject, a.category, a.attributes, a.caption, a.confidence
+		FROM images i
+		LEFT JOIN image_analysis a ON a.image_id=i.id
+		WHERE `+where+`
+		ORDER BY i.created_at DESC, i.id DESC
+		LIMIT $6 OFFSET $7`, append(args, filter.Limit, filter.Offset)...)
+	if err != nil {
+		return domain.ImagePage{}, errors.New("could not list images")
+	}
+	defer rows.Close()
+	items := make([]domain.ImageRecord, 0)
+	for rows.Next() {
+		var record domain.ImageRecord
+		var subject, category, caption *string
+		var attrs []byte
+		var confidence *float64
+		if err := rows.Scan(&record.ID, &record.Status, &record.SHA256, &record.MIMEType, &record.SizeBytes, &record.CreatedAt,
+			&subject, &category, &attrs, &caption, &confidence); err != nil {
+			return domain.ImagePage{}, errors.New("could not list images")
+		}
+		if subject != nil && category != nil && caption != nil && confidence != nil {
+			metadata := &domain.ImageMetadata{Subject: *subject, Category: *category, Caption: *caption, Confidence: *confidence}
+			if err := json.Unmarshal(attrs, &metadata.Attributes); err != nil || metadata.Validate() != nil {
+				return domain.ImagePage{}, errors.New("stored image metadata is invalid")
+			}
+			record.Metadata = metadata
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ImagePage{}, errors.New("could not list images")
+	}
+	counts := map[string]int{"queued": 0, "processing": 0, "processed": 0, "needs_review": 0, "failed": 0}
+	countRows, err := s.pool.Query(ctx, `SELECT status, count(*) FROM images WHERE tenant_id=$1::uuid GROUP BY status`, tenantID)
+	if err != nil {
+		return domain.ImagePage{}, errors.New("could not count image states")
+	}
+	defer countRows.Close()
+	for countRows.Next() {
+		var status string
+		var count int
+		if err := countRows.Scan(&status, &count); err != nil {
+			return domain.ImagePage{}, errors.New("could not count image states")
+		}
+		counts[status] = count
+	}
+	if err := countRows.Err(); err != nil {
+		return domain.ImagePage{}, errors.New("could not count image states")
+	}
+	return domain.ImagePage{Items: items, Total: total, Limit: filter.Limit, Offset: filter.Offset, StatusCounts: counts}, nil
+}
+
+func (s *ImageService) Content(ctx context.Context, imageID string) (domain.ImageContent, error) {
+	tenantID, err := s.developmentTenantID(ctx)
+	if err != nil {
+		return domain.ImageContent{}, err
+	}
+	var key, mimeType string
+	var size int64
+	err = s.pool.QueryRow(ctx, `SELECT storage_key, mime_type, size_bytes FROM images WHERE id=$1::uuid AND tenant_id=$2::uuid`, imageID, tenantID).Scan(&key, &mimeType, &size)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ImageContent{}, ErrImageNotFound
+	}
+	if err != nil {
+		return domain.ImageContent{}, errors.New("could not retrieve image content")
+	}
+	if !safeStorageKey.MatchString(key) || (mimeType == "image/jpeg" && filepath.Ext(key) != ".jpg") || (mimeType == "image/png" && filepath.Ext(key) != ".png") {
+		return domain.ImageContent{}, errors.New("stored image reference is invalid")
+	}
+	root, err := os.OpenRoot(s.root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return domain.ImageContent{}, ErrImageNotFound
+		}
+		return domain.ImageContent{}, errors.New("could not open image content")
+	}
+	file, err := root.Open(key)
+	_ = root.Close()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return domain.ImageContent{}, ErrImageNotFound
+		}
+		return domain.ImageContent{}, errors.New("could not open image content")
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() != size {
+		_ = file.Close()
+		return domain.ImageContent{}, errors.New("stored image content is invalid")
+	}
+	return domain.ImageContent{Body: file, MIMEType: mimeType, SizeBytes: info.Size()}, nil
 }
 
 func (s *ImageService) developmentTenantID(ctx context.Context) (string, error) {

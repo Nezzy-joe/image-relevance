@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Nezzy-joe/image-relevance/internal/domain"
+	"github.com/Nezzy-joe/image-relevance/internal/matching"
 )
 
 type fakePinger struct{ err error }
@@ -86,6 +89,134 @@ func TestUnknownRouteUsesJSONError(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `"code":"not_found"`) {
 		t.Fatalf("body = %s, want not_found error", response.Body.String())
+	}
+}
+
+type fakeImageOperations struct {
+	page    domain.ImagePage
+	filter  domain.ImageListFilter
+	content domain.ImageContent
+	err     error
+}
+
+func (f *fakeImageOperations) Upload(context.Context, []byte, string) (domain.ImageUploadResult, error) {
+	return domain.ImageUploadResult{}, nil
+}
+func (f *fakeImageOperations) Get(context.Context, string) (domain.ImageRecord, error) {
+	return domain.ImageRecord{}, f.err
+}
+func (f *fakeImageOperations) List(_ context.Context, filter domain.ImageListFilter) (domain.ImagePage, error) {
+	f.filter = filter
+	return f.page, f.err
+}
+func (f *fakeImageOperations) Content(context.Context, string) (domain.ImageContent, error) {
+	return f.content, f.err
+}
+
+type fakeMatchingOperations struct {
+	page matching.MatchPage
+	err  error
+}
+
+func (f fakeMatchingOperations) CreatePost(context.Context, matching.PostInput) (matching.Post, error) {
+	return matching.Post{}, f.err
+}
+func (f fakeMatchingOperations) Match(context.Context, string) (matching.MatchResult, error) {
+	return matching.MatchResult{}, f.err
+}
+func (f fakeMatchingOperations) Review(context.Context, string, matching.Review) (matching.ReviewResult, error) {
+	return matching.ReviewResult{}, f.err
+}
+func (f fakeMatchingOperations) ListMatches(context.Context, int, int) (matching.MatchPage, error) {
+	return f.page, f.err
+}
+func (f fakeMatchingOperations) ListReviewHistory(context.Context, string, int, int) (matching.ReviewHistoryPage, error) {
+	return matching.ReviewHistoryPage{Items: []matching.ReviewResult{}, Limit: 20}, f.err
+}
+
+func TestImageListParsesFiltersAndReturnsPage(t *testing.T) {
+	images := &fakeImageOperations{page: domain.ImagePage{Items: []domain.ImageRecord{}, Total: 8, Limit: 10, Offset: 20}}
+	handler := NewRouterWithImages(testLogger(), fakePinger{}, time.Second, images, 10<<20)
+	response := performRequest(handler, "/v1/images?limit=10&offset=20&q=red&category=wildlife&subject=fox&status=processed")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total":8`) {
+		t.Fatalf("image list response = (%d, %s)", response.Code, response.Body.String())
+	}
+	if images.filter.Limit != 10 || images.filter.Offset != 20 || images.filter.Query != "red" || images.filter.Category != "wildlife" || images.filter.Subject != "fox" || images.filter.Status != "processed" {
+		t.Fatalf("unexpected filter passed to image service: %+v", images.filter)
+	}
+}
+
+func TestImageListRejectsInvalidPaginationAndStatus(t *testing.T) {
+	for _, path := range []string{"/v1/images?limit=0", "/v1/images?offset=-1", "/v1/images?status=unknown"} {
+		response := performRequest(NewRouterWithImages(testLogger(), fakePinger{}, time.Second, &fakeImageOperations{}, 10<<20), path)
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_query"`) {
+			t.Errorf("%s response = (%d, %s), want invalid query", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestImageContentUsesSafeHeadersAndStreamsBody(t *testing.T) {
+	images := &fakeImageOperations{content: domain.ImageContent{Body: io.NopCloser(strings.NewReader("jpeg-data")), MIMEType: "image/jpeg", SizeBytes: 9}}
+	response := performRequest(NewRouterWithImages(testLogger(), fakePinger{}, time.Second, images, 10<<20), "/v1/images/11111111-1111-4111-8111-111111111111/content")
+	if response.Code != http.StatusOK || response.Body.String() != "jpeg-data" {
+		t.Fatalf("content response = (%d, %q)", response.Code, response.Body.String())
+	}
+	if response.Header().Get("X-Content-Type-Options") != "nosniff" || response.Header().Get("Cache-Control") != "private, no-store" || response.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("unsafe or missing content headers: %v", response.Header())
+	}
+}
+
+func TestImageContentRejectsMalformedImageIDAsNotFound(t *testing.T) {
+	response := performRequest(NewRouterWithImages(testLogger(), fakePinger{}, time.Second, &fakeImageOperations{}, 10<<20), "/v1/images/not-a-uuid/content")
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("malformed image ID response=(%d, %s), want safe 404", response.Code, response.Body.String())
+	}
+}
+
+func TestRecentMatchesRouteReturnsPersistedPage(t *testing.T) {
+	handler := NewRouterWithOperations(testLogger(), fakePinger{}, time.Second, nil, fakeMatchingOperations{
+		page: matching.MatchPage{Items: []matching.RecentMatch{}, Total: 3, Limit: 2, Offset: 1},
+	}, 10<<20)
+	response := performRequest(handler, "/v1/matches?limit=2&offset=1")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total":3`) {
+		t.Fatalf("matches response = (%d, %s)", response.Code, response.Body.String())
+	}
+}
+
+func TestRecentMatchesCanBeReadWithoutGeminiOperations(t *testing.T) {
+	handler := NewRouterWithReadOperations(testLogger(), fakePinger{}, time.Second, nil, nil, fakeMatchingOperations{
+		page: matching.MatchPage{Items: []matching.RecentMatch{}, Total: 4, Limit: 20, Offset: 0},
+	}, 10<<20)
+	response := performRequest(handler, "/v1/matches")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total":4`) {
+		t.Fatalf("history without Gemini response = (%d, %s)", response.Code, response.Body.String())
+	}
+}
+
+func TestReviewHistoryRouteReturnsTenantScopedHistoryPage(t *testing.T) {
+	handler := NewRouterWithReadOperations(testLogger(), fakePinger{}, time.Second, nil, nil, fakeMatchingOperations{}, 10<<20)
+	response := performRequest(handler, "/v1/matches/11111111-1111-4111-8111-111111111111/reviews?limit=10&offset=2")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"items":[]`) {
+		t.Fatalf("review history response = (%d, %s)", response.Code, response.Body.String())
+	}
+}
+
+func TestReviewHistoryRejectsMalformedSuggestionID(t *testing.T) {
+	handler := NewRouterWithReadOperations(testLogger(), fakePinger{}, time.Second, nil, nil, fakeMatchingOperations{}, 10<<20)
+	response := performRequest(handler, "/v1/matches/nope/reviews")
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("malformed history ID response = (%d, %s)", response.Code, response.Body.String())
+	}
+}
+
+func TestReviewActionIsAvailableWithoutGeminiMatchingOperations(t *testing.T) {
+	handler := NewRouterWithReadOperations(testLogger(), fakePinger{}, time.Second, nil, nil, fakeMatchingOperations{}, 10<<20)
+	request := httptest.NewRequest(http.MethodPost, "/v1/matches/11111111-1111-4111-8111-111111111111/review", strings.NewReader(`{"decision":"approved"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("review response = (%d, %s), want 201 without Gemini operations", response.Code, response.Body.String())
 	}
 }
 

@@ -37,7 +37,17 @@ The business routes are registered only for `APP_ENV=development`. The productio
 - `cmd/api` loads configuration, opens a pgx pool, applies embedded migrations, and serves HTTP with request IDs, structured logs, recovery, bounded request timeouts, and graceful shutdown.
 - `cmd/seed` idempotently creates the development tenant and refuses other environments.
 - `cmd/worker` requires `GEMINI_API_KEY`, applies migrations, and runs the PostgreSQL-backed queue. It is behind Compose's `ai` profile so the API/database foundation can run without provider credentials.
-- `cmd/evaluate` validates licensed image and article CSV manifests, checks the image rows in PostgreSQL, executes actual matching, and prints calculated metrics.
+- `cmd/evaluate` validates required image/article manifest fields and supplied source/license metadata, checks image rows in PostgreSQL, executes actual matching, and prints calculated metrics. Metadata validation does not independently establish legal usage rights.
+
+The host-run API defaults to `127.0.0.1:8080`. Compose overrides the container listener to `0.0.0.0:8080` for internal networking while publishing the host port only on `127.0.0.1:8080`. The HTTP write timeout defaults to 65 seconds; each Gemini request is limited to 25 seconds. Configuration rejects a write timeout that cannot accommodate two sequential provider calls plus a 10-second response margin, which covers article subject resolution followed by embedding without removing finite timeouts.
+
+## Implemented frontend
+
+The standalone React/TypeScript app in `web/` provides the responsive workspace shell, live overview, and image library. It uses TanStack Query for API state, Zod to validate client responses, and a Vite `/api` proxy to the loopback Go API. The Vite server binds to `127.0.0.1:5173` by default. No Gemini key or database URL is used by the browser.
+
+The overview reads `/health`, `/ready`, `/v1/images`, and `/v1/matches`. The history read service is wired independently of the Gemini-backed matching operations, so saved decisions remain readable when the provider key is absent. The image library uploads through `POST /v1/images`, polls `GET /v1/images/{imageID}`, lists filtered pages from `GET /v1/images`, and loads previews through the tenant-scoped content route. Content paths are selected by the backend and never returned to the browser.
+
+Matching Studio creates posts and runs matching through the API, rendering accepted and rejected candidates, mismatch explanations, and `NO_CONFIDENT_MATCH` responses. Decision Inspector presents source article details, candidate metadata, scores, and the original backend decision. Review Centre lists persisted decisions, submits approval or rejection with an optional note, and reads append-only review history. The frontend tests mock the HTTP boundary; live PostgreSQL and Gemini evidence is reported separately in `EVIDENCE.md`. The current business API remains development-tenant-only and has no authenticated reviewer or tenant selection.
 
 ## Final capstone demonstration
 

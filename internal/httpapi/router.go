@@ -24,6 +24,8 @@ func NewRouter(logger *slog.Logger, database DatabasePinger, readinessTimeout ti
 type ImageOperations interface {
 	Upload(context.Context, []byte, string) (domain.ImageUploadResult, error)
 	Get(context.Context, string) (domain.ImageRecord, error)
+	List(context.Context, domain.ImageListFilter) (domain.ImagePage, error)
+	Content(context.Context, string) (domain.ImageContent, error)
 }
 
 func NewRouterWithImages(logger *slog.Logger, database DatabasePinger, readinessTimeout time.Duration, images ImageOperations, maxImageBytes int64) http.Handler {
@@ -34,9 +36,27 @@ type MatchingOperations interface {
 	CreatePost(context.Context, matching.PostInput) (matching.Post, error)
 	Match(context.Context, string) (matching.MatchResult, error)
 	Review(context.Context, string, matching.Review) (matching.ReviewResult, error)
+	MatchHistoryOperations
+}
+
+type ReviewOperations interface {
+	Review(context.Context, string, matching.Review) (matching.ReviewResult, error)
+}
+
+type MatchHistoryOperations interface {
+	ListMatches(context.Context, int, int) (matching.MatchPage, error)
+	ListReviewHistory(context.Context, string, int, int) (matching.ReviewHistoryPage, error)
 }
 
 func NewRouterWithOperations(logger *slog.Logger, database DatabasePinger, readinessTimeout time.Duration, images ImageOperations, matches MatchingOperations, maxImageBytes int64) http.Handler {
+	var history MatchHistoryOperations
+	if matches != nil {
+		history = matches
+	}
+	return NewRouterWithReadOperations(logger, database, readinessTimeout, images, matches, history, maxImageBytes)
+}
+
+func NewRouterWithReadOperations(logger *slog.Logger, database DatabasePinger, readinessTimeout time.Duration, images ImageOperations, matches MatchingOperations, history MatchHistoryOperations, maxImageBytes int64) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
 	router.Use(middleware.AccessLog(logger))
@@ -83,6 +103,19 @@ func NewRouterWithOperations(logger *slog.Logger, database DatabasePinger, readi
 	}
 	if matches != nil {
 		registerMatchingRoutes(router, matches)
+	}
+	if history != nil {
+		registerMatchHistoryRoute(router, history)
+	}
+	var reviews ReviewOperations
+	if matches != nil {
+		reviews = matches
+	}
+	if historyReviews, ok := history.(ReviewOperations); ok {
+		reviews = historyReviews
+	}
+	if reviews != nil {
+		registerReviewRoute(router, reviews)
 	}
 
 	return router
